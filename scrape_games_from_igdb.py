@@ -2,6 +2,8 @@ try:
     from dotenv import load_dotenv
     import requests
     import os
+    import re
+    import json
     import urllib.parse
     import webbrowser
     load_dotenv()
@@ -9,6 +11,44 @@ except ModuleNotFoundError:
     os.system('pip install requests')
     os.system('pip install python-dotenv')
     raise ModuleNotFoundError("Please restart the script")
+
+def find_games_with_extension(directory, extension):
+    found_games = []
+
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            if file.endswith('.' + extension):
+                # Check the depth of the current root relative to the base directory
+                path_parts = os.path.relpath(root, directory).split(os.sep)
+                if len(path_parts) > 1:
+                    # More than one level deep; use the first directory name under base as game name
+                    game_name = path_parts[0]
+                else:
+                    # Directly in the base directory; use the file name
+                    game_name = file.replace('.' + extension, '')
+
+                game_path = os.path.join(root, file)
+                game_name = re.split(r" \[|\s\(", game_name)[0]
+                found_games.append({'name': game_name, 'path': game_path})
+
+    return found_games
+
+def map_games_from_playlists():
+    playlists_with_game_paths = []
+
+    with open('playlists.json', 'r') as file:
+        data = json.load(file)
+
+        if not data:
+            return []
+
+        for playlist in data:
+            parsed_playlist = {}
+            parsed_playlist['database'] = playlist['database']
+            parsed_playlist['games'] = find_games_with_extension(playlist['roms'], playlist['extensions'])
+            playlists_with_game_paths.append(parsed_playlist)
+
+    return playlists_with_game_paths
 
 def render_game_page(game, choice):
     # Generate the HTML content
@@ -88,32 +128,34 @@ def get_twitch_access_token(client_id, client_secret):
         print(response.json())
         return None
 
-def scrape_game(client_id, access_token, game_title):
+def scrape_game(client_id, access_token, game):
     url = 'https://api.igdb.com/v4/games'
     headers = {
         'Client-ID': client_id,
         'Authorization': f'Bearer {access_token}',
     }
-    data = f'search "{game_title}"; fields name,cover.url,summary,platforms.name,genres.name,release_dates.human; limit 10;'
+    data = f'search "{game['name']}"; fields name,cover.url,summary,platforms.name,genres.name,release_dates.human; limit 20;'
     response = requests.post(url, headers=headers, data=data)
     games = response.json()
 
     if not games:
-        print("No games found with that title.")
+        print(f"No games found by title: {game['name']}")
         return
 
     print("Found the following games:\n")
     for i, game in enumerate(games):
+        choice = i+1
         metadata = generate_metadata_for_game(game)
-        print(f"{i+1}: {metadata['name']}")
-        render_game_page(metadata, i+1)
+        print(f"{choice}: {metadata['name']}")
+        # render_game_page(metadata, choice)
 
     print("\n")
 
     if len(games) == 1:
         choice = 0
     else:
-        choice = int(input("Enter the number of the game you wish to scrape.")) - 1
+        # choice = int(input("Enter the number of the game you wish to scrape.")) - 1
+        choice = 0
 
     if choice < 0 or choice >= len(games):
         print("Invalid choice")
@@ -130,5 +172,20 @@ if __name__ == "__main__":
     if access_token:
         print(f"Access Token: {access_token}")
 
-    game_title = input("Enter the partial title of the game: ")
-    scrape_game(client_id, access_token, game_title)
+    playlists_for_retroarch = []
+
+    for playlist in map_games_from_playlists():
+        for game in playlist['games']:
+            game['metadata'] = scrape_game(client_id, access_token, game)
+
+        playlists_for_retroarch.append({
+            'database': playlist['database'],
+            'games': playlist['games']
+        })
+
+    for playlist_info in playlists_for_retroarch:
+        print(playlist_info['database'])
+        for game in playlist_info['games']:
+            print(game['name'])
+            print(game['path'])
+            print(game['metadata'])
