@@ -1,12 +1,21 @@
 [
     {
         "database": "Nintendo - Wii U",
-        "roms": "/home/user/games/wiiu",
-        "extensions": "rpx"
+        "roms": "/home/user/Games/Emus/Cemu/Roms",
+        "extensions": ["rpx"]
     },
     {
         "database": "Nintendo - 64",
-        "roms": "/home/user/games/n64",
-        "extensions": "n64"
+        "roms": "/home/user/Games/Emus/N64/roms",
+        "extensions": ["n64"]
+    },
+    {
+        "database": "PC",
+        "extensions": ["lutris"]
+    },
+    {
+        "database": "PC",
+        "roms": "/home/user/Games/Heroic/HeroicBashLauncher/GameFiles",
+        "extensions": ["heroic"]
     }
 ]

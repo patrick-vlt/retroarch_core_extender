@@ -8,50 +8,79 @@ try:
     import webbrowser
     load_dotenv()
 except ModuleNotFoundError:
-    os.system('pip install requests')
-    os.system('pip install python-dotenv')
+    os.system('pip install requests --break-system-packages')
+    os.system('pip install python-dotenv --break-system-packages')
     raise ModuleNotFoundError("Please restart the script")
 
-def find_games_with_extension(directory, extension):
+def find_games_from_playlist(playlist):
+    if 'lutris' in playlist['extensions']:
+        return find_games_installed_in_lutris()
+
+    return find_games_by_extension(playlist)
+
+def find_games_installed_in_lutris():
     found_games = []
 
-    for root, dirs, files in os.walk(directory):
-        for file in files:
-            if file.endswith('.' + extension):
-                # Check the depth of the current root relative to the base directory
-                path_parts = os.path.relpath(root, directory).split(os.sep)
-                if len(path_parts) > 1:
-                    # More than one level deep; use the first directory name under base as game name
-                    game_name = path_parts[0]
-                else:
-                    # Directly in the base directory; use the file name
-                    game_name = file.replace('.' + extension, '')
+    try:
+        response = os.popen('lutris -l --json').read()
+        games = json.loads(response)
+    except:
+        print("Failed to get installed games from Lutris")
+        return []
 
-                game_path = os.path.join(root, file)
-                game_name = re.split(r" \[|\s\(", game_name)[0]
-                found_games.append({'name': game_name, 'path': game_path})
+    print('Fetched installed games from Lutris. Processing...')
+
+    for game in games:
+        try:
+            game = dict(game)
+            found_games.append({'name': game['name'], 'path': f"env LUTRIS_SKIP_INIT=1 lutris lutris:rungameid/{game['id']}"})
+        except:
+            continue
+
+    return found_games
+
+def find_games_by_extension(playlist):
+    found_games = []
+
+    for root, dirs, files in os.walk(playlist['roms']):
+        for file in files:
+            for extension in playlist['extensions']:
+                if file.endswith('.' + extension):
+                    # Check the depth of the current root relative to the base directory
+                    path_parts = os.path.relpath(root, playlist['roms']).split(os.sep)
+
+                    if len(path_parts) > 1:
+                        # More than one level deep; use the first directory name under base as game name
+                        game_name = path_parts[0]
+                    else:
+                        # Directly in the base directory; use the file name
+                        game_name = file.replace('.' + playlist['roms'], '')
+
+                    game_path = os.path.join(root, file)
+                    game_name = re.split(r" \[|\s\(", game_name)[0]
+                    game_name = game_name.replace(f".{extension}", '')
+                    found_games.append({'name': game_name, 'path': game_path})
 
     return found_games
 
 def map_games_from_playlists():
     playlists_with_game_paths = []
 
-    with open('playlists.json', 'r') as file:
-        data = json.load(file)
+    with open('playlists.json', 'r') as playlists_file:
+        playlists = json.load(playlists_file)
 
-        if not data:
+        if not playlists:
             return []
 
-        for playlist in data:
+        for playlist in playlists:
             parsed_playlist = {}
             parsed_playlist['database'] = playlist['database']
-            parsed_playlist['games'] = find_games_with_extension(playlist['roms'], playlist['extensions'])
+            parsed_playlist['games'] = find_games_from_playlist(playlist)
             playlists_with_game_paths.append(parsed_playlist)
 
     return playlists_with_game_paths
 
 def render_game_page(game, choice):
-    # Generate the HTML content
     html_content = f"""
     <!DOCTYPE html>
     <html lang="en">
@@ -129,6 +158,8 @@ def get_twitch_access_token(client_id, client_secret):
         return None
 
 def scrape_game(client_id, access_token, game):
+    print(f"\nScraping game: {game['name']}...\n")
+
     url = 'https://api.igdb.com/v4/games'
     headers = {
         'Client-ID': client_id,
@@ -140,7 +171,7 @@ def scrape_game(client_id, access_token, game):
 
     if not games:
         print(f"No games found by title: {game['name']}")
-        return
+        return []
 
     print("Found the following games:\n")
     for i, game in enumerate(games):
@@ -176,7 +207,11 @@ if __name__ == "__main__":
 
     for playlist in map_games_from_playlists():
         for game in playlist['games']:
+            game['metadata'] = []
             game['metadata'] = scrape_game(client_id, access_token, game)
+            # if metadata is still an empty array
+            if not game['metadata']:
+                playlist['games'].remove(game)
 
         playlists_for_retroarch.append({
             'database': playlist['database'],
@@ -188,4 +223,8 @@ if __name__ == "__main__":
         for game in playlist_info['games']:
             print(game['name'])
             print(game['path'])
-            print(game['metadata'])
+            try:
+                if game['metadata']:
+                    print(game['metadata'])
+            except:
+                pass
