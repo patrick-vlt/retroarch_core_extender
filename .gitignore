@@ -1,2 +1,3 @@
 venv
 playlists.json
+*/__pycache__

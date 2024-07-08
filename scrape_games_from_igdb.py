@@ -1,146 +1,57 @@
+from src.Game import Game
+from src.Playlist import Playlist
+from src.Metadata import Metadata
+
+from typing import List, Iterator, Optional
+
 try:
     from dotenv import load_dotenv
     import requests
     import os
-    import re
     import json
-    import urllib.parse
-    import webbrowser
+
     load_dotenv()
 except ModuleNotFoundError:
     os.system('pip install requests --break-system-packages')
     os.system('pip install python-dotenv --break-system-packages')
     raise ModuleNotFoundError("Please restart the script")
 
-def find_games_from_playlist(playlist):
-    if 'lutris' in playlist['extensions']:
-        return find_games_installed_in_lutris()
+def map_games_from_playlists() -> List[Playlist]:
+    playlists = []
 
-    return find_games_by_extension(playlist)
+    with open('playlists.json', 'r') as playlists_json_raw:
+        playlists_json = json.load(playlists_json_raw)
 
-def find_games_installed_in_lutris():
-    found_games = []
-
-    try:
-        response = os.popen('lutris -l --json').read()
-        games = json.loads(response)
-    except:
-        print("Failed to get installed games from Lutris")
-        return []
-
-    print('Fetched installed games from Lutris. Processing...')
-
-    for game in games:
-        try:
-            game = dict(game)
-            found_games.append({'name': game['name'], 'path': f"env LUTRIS_SKIP_INIT=1 lutris lutris:rungameid/{game['id']}"})
-        except:
-            continue
-
-    return found_games
-
-def find_games_by_extension(playlist):
-    found_games = []
-
-    for root, dirs, files in os.walk(playlist['roms']):
-        for file in files:
-            for extension in playlist['extensions']:
-                if file.endswith('.' + extension):
-                    # Check the depth of the current root relative to the base directory
-                    path_parts = os.path.relpath(root, playlist['roms']).split(os.sep)
-
-                    if len(path_parts) > 1:
-                        # More than one level deep; use the first directory name under base as game name
-                        game_name = path_parts[0]
-                    else:
-                        # Directly in the base directory; use the file name
-                        game_name = file.replace('.' + playlist['roms'], '')
-
-                    game_path = os.path.join(root, file)
-                    game_name = re.split(r" \[|\s\(", game_name)[0]
-                    game_name = game_name.replace(f".{extension}", '')
-                    found_games.append({'name': game_name, 'path': game_path})
-
-    return found_games
-
-def map_games_from_playlists():
-    playlists_with_game_paths = []
-
-    with open('playlists.json', 'r') as playlists_file:
-        playlists = json.load(playlists_file)
-
-        if not playlists:
+        if not playlists_json:
             return []
 
-        for playlist in playlists:
-            parsed_playlist = {}
-            parsed_playlist['database'] = playlist['database']
-            parsed_playlist['games'] = find_games_from_playlist(playlist)
-            playlists_with_game_paths.append(parsed_playlist)
+        for playlist_json in playlists_json:
+            playlist = Playlist(
+                playlist_json['database'],
+                playlist_json['roms'],
+                playlist_json['extensions'],
+            )
+            playlist.set_games()
+            playlists.append(playlist)
 
-    return playlists_with_game_paths
-
-def render_game_page(game, choice):
-    html_content = f"""
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>{game['name']}</title>
-        <link href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
-    </head>
-    <body>
-        <div class="container mt-5">
-            <div class="row">
-                <div class="col-md-4">
-                    <img src="{game['cover_url']}" class="img-fluid" alt="Game Cover">
-                </div>
-                <div class="col-md-8">
-                    <h1>{game['name']}</h1>
-                    <p><strong>Choice:</strong> {choice}</p>
-                    <p><strong>Summary:</strong> {game['summary']}</p>
-                    <p><strong>Platforms:</strong> {', '.join(game['platforms'])}</p>
-                    <p><strong>Genres:</strong> {', '.join(game['genres'])}</p>
-                    <p><strong>Release Dates:</strong> {', '.join(game['release_dates'])}</p>
-                </div>
-            </div>
-        </div>
-        <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
-        <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
-    </body>
-    </html>
-    """
-
-    # Encode the HTML content using the urllib.parse.quote function
-    encoded_html = urllib.parse.quote(html_content)
-
-    # Construct the data URI
-    data_uri = f"data:text/html;charset=utf-8,{encoded_html}"
-
-    # Open the data URI in the default web browser
-    webbrowser.open(data_uri)
-
-def open_in_browser(url):
-    webbrowser.open(url)
+    return playlists
 
 def generate_metadata_for_game(game):
     cover_url = game.get('cover', {}).get('url', None)
+
     if cover_url:
         cover_url = f"https:{cover_url.replace('t_thumb', 't_cover_big')}"
 
-    metadata = {
-        "name": game.get('name', 'N/A'),
-        "summary": game.get('summary', 'N/A'),
-        "platforms": [platform['name'] for platform in game.get('platforms', [])],
-        "genres": [genre['name'] for genre in game.get('genres', [])],
-        "release_dates": [date['human'] for date in game.get('release_dates', [])],
-        "cover_url": cover_url
-    }
+    return Metadata(
+        game.get('name', 'N/A'),
+        game.get('summary', 'N/A'),
+        [platform['name'] for platform in game.get('platforms', [])],
+        [genre['name'] for genre in game.get('genres', [])],
+        [date['human'] for date in game.get('release_dates', [])],
+        cover_url
+    )
 
-    return metadata
-
-def get_twitch_access_token(client_id, client_secret):
+def get_twitch_access_token(client_id:str, client_secret:str) -> str:
     url = 'https://id.twitch.tv/oauth2/token'
     params = {
         'client_id': client_id,
@@ -157,7 +68,7 @@ def get_twitch_access_token(client_id, client_secret):
         print(response.json())
         return None
 
-def scrape_game(client_id, access_token, game):
+def scrape_game(client_id:str, access_token:str, game:Game) -> Optional[Metadata]:
     print(f"\nScraping game: {game['name']}...\n")
 
     url = 'https://api.igdb.com/v4/games'
@@ -171,7 +82,7 @@ def scrape_game(client_id, access_token, game):
 
     if not games:
         print(f"No games found by title: {game['name']}")
-        return []
+        return None
 
     print("Found the following games:\n")
     for i, game in enumerate(games):
@@ -203,22 +114,18 @@ if __name__ == "__main__":
     if access_token:
         print(f"Access Token: {access_token}")
 
-    playlists_for_retroarch = []
+    playlists = map_games_from_playlists()
 
-    for playlist in map_games_from_playlists():
-        for game in playlist['games']:
-            game['metadata'] = []
-            game['metadata'] = scrape_game(client_id, access_token, game)
-            # if metadata is still an empty array
-            if not game['metadata']:
-                playlist['games'].remove(game)
+    for playlist in playlists:
+        for game in playlist.get_games():
+            game.set_metadata(scrape_game(client_id, access_token, game))
 
-        playlists_for_retroarch.append({
-            'database': playlist['database'],
-            'games': playlist['games']
-        })
+            if game.get_metadata():
+                continue
 
-    for playlist_info in playlists_for_retroarch:
+            playlist.remove_game(game)
+
+    for playlist_info in playlists:
         print(playlist_info['database'])
         for game in playlist_info['games']:
             print(game['name'])
